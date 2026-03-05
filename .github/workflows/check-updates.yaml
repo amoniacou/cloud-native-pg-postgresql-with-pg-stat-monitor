@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "0 6 * * *"
   workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: "Force rebuild all tracked images"
+        type: boolean
+        default: false
 
 env:
   REGISTRY: ghcr.io
@@ -59,9 +64,25 @@ jobs:
           UPSTREAM_TOKEN=$(get_ghcr_token "${{ env.UPSTREAM_IMAGE }}")
           UPSTREAM_TAGS=$(list_tags "${{ env.UPSTREAM_IMAGE }}" "$UPSTREAM_TOKEN")
 
-          echo "Fetching our tags..."
-          OUR_TOKEN=$(get_ghcr_token "${{ env.IMAGE_NAME }}")
-          OUR_TAGS=$(list_tags "${{ env.IMAGE_NAME }}" "$OUR_TOKEN" || echo "")
+          # On Mondays or force_rebuild: rebuild all tracked images for security updates
+          # Other days: only build missing images
+          DAY_OF_WEEK=$(date +%u)
+          FORCE_REBUILD="${{ inputs.force_rebuild }}"
+          if [ "$DAY_OF_WEEK" = "1" ] || [ "$FORCE_REBUILD" = "true" ]; then
+            echo "Rebuild mode: rebuilding all tracked images"
+            REBUILD_ALL=true
+          else
+            echo "Normal mode: building only missing images"
+            REBUILD_ALL=false
+          fi
+
+          if [ "$REBUILD_ALL" = "false" ]; then
+            echo "Fetching our tags..."
+            OUR_TOKEN=$(get_ghcr_token "${{ env.IMAGE_NAME }}")
+            OUR_TAGS=$(list_tags "${{ env.IMAGE_NAME }}" "$OUR_TOKEN" || echo "")
+          else
+            OUR_TAGS=""
+          fi
 
           # Filter upstream tags: match XX.Y-standard-variant (no date suffix)
           # Only keep the 3 latest minor versions per major per variant
@@ -75,7 +96,7 @@ jobs:
               while IFS= read -r tag; do
                 [ -z "$tag" ] && continue
 
-                if echo "$OUR_TAGS" | grep -qx "$tag"; then
+                if [ "$REBUILD_ALL" = "false" ] && echo "$OUR_TAGS" | grep -qx "$tag"; then
                   echo "Already exists: $tag"
                   continue
                 fi
@@ -83,7 +104,7 @@ jobs:
                 pg_version=$(echo "$tag" | sed 's/-standard-.*//')
                 deb_version="standard-${variant}"
 
-                echo "New version found: pg_version=$pg_version deb_version=$deb_version"
+                echo "Will build: pg_version=$pg_version deb_version=$deb_version"
                 MATRIX_JSON=$(echo "$MATRIX_JSON" | jq -c \
                   --arg pv "$pg_version" --arg dv "$deb_version" \
                   '. + [{"pg_version": $pv, "deb_version": $dv}]')
@@ -150,3 +171,24 @@ jobs:
             DEB_VERSION=${{ matrix.deb_version }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  trivy-scan:
+    needs: [discover-versions, build-and-push]
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    strategy:
+      matrix: ${{ fromJson(needs.discover-versions.outputs.matrix) }}
+    steps:
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ghcr.io/${{ env.IMAGE_NAME }}:${{ matrix.pg_version }}-${{ matrix.deb_version }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+
+      - name: Upload Trivy scan results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif

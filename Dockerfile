@@ -14,7 +14,7 @@ RUN --mount=type=cache,sharing=locked,target=/var/cache/apt \
     && mkdir -p /var/lib/apt/lists/partial \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
-       curl gnupg2 lsb-release \
+       curl gpgv gnupg2 lsb-release \
     && curl -fsSL https://repo.percona.com/apt/percona-release_latest.$(lsb_release -sc)_all.deb \
        -o /tmp/percona-release.deb \
     && dpkg -i /tmp/percona-release.deb \
