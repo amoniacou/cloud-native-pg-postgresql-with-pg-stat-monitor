@@ -33,7 +33,7 @@ jobs:
           list_tags() {
             local image=$1
             local token=$2
-            local url="https://ghcr.io/v2/${image}/tags/list"
+            local url="https://ghcr.io/v2/${image}/tags/list?n=10000"
             local all_tags=""
 
             while [ -n "$url" ]; do
@@ -42,9 +42,14 @@ jobs:
               all_tags="${all_tags}${tags}"$'\n'
 
               # Handle pagination via Link header
-              url=$(grep -i '^link:' /tmp/headers 2>/dev/null \
+              next_path=$(grep -i '^link:' /tmp/headers 2>/dev/null \
                 | sed -n 's/.*<\(.*\)>; *rel="next".*/\1/p' \
                 | tr -d '\r' || true)
+              if [ -n "$next_path" ]; then
+                url="https://ghcr.io${next_path}"
+              else
+                url=""
+              fi
             done
 
             echo "$all_tags" | sort -u | grep -v '^$'
