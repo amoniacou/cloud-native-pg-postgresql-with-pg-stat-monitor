@@ -64,29 +64,31 @@ jobs:
           OUR_TAGS=$(list_tags "${{ env.IMAGE_NAME }}" "$OUR_TOKEN" || echo "")
 
           # Filter upstream tags: match XX.Y-standard-variant (no date suffix)
+          # Only keep the 3 latest minor versions per major per variant
           MATRIX_JSON="[]"
           for major in ${{ env.PG_MAJORS }}; do
-            MATCHING=$(echo "$UPSTREAM_TAGS" \
-              | grep -E "^${major}\.[0-9]+-standard-(trixie|bookworm)$" || true)
+            for variant in bookworm trixie; do
+              LATEST_TAGS=$(echo "$UPSTREAM_TAGS" \
+                | grep -E "^${major}\.[0-9]+-standard-${variant}$" \
+                | sort -V | tail -3 || true)
 
-            while IFS= read -r tag; do
-              [ -z "$tag" ] && continue
+              while IFS= read -r tag; do
+                [ -z "$tag" ] && continue
 
-              # Check if we already have this tag
-              if echo "$OUR_TAGS" | grep -qx "$tag"; then
-                echo "Already exists: $tag"
-                continue
-              fi
+                if echo "$OUR_TAGS" | grep -qx "$tag"; then
+                  echo "Already exists: $tag"
+                  continue
+                fi
 
-              # Parse pg_version and deb_version
-              pg_version=$(echo "$tag" | sed 's/-standard-.*//')
-              deb_version=$(echo "$tag" | sed "s/^${pg_version}-//")
+                pg_version=$(echo "$tag" | sed 's/-standard-.*//')
+                deb_version="standard-${variant}"
 
-              echo "New version found: pg_version=$pg_version deb_version=$deb_version"
-              MATRIX_JSON=$(echo "$MATRIX_JSON" | jq -c \
-                --arg pv "$pg_version" --arg dv "$deb_version" \
-                '. + [{"pg_version": $pv, "deb_version": $dv}]')
-            done <<< "$MATCHING"
+                echo "New version found: pg_version=$pg_version deb_version=$deb_version"
+                MATRIX_JSON=$(echo "$MATRIX_JSON" | jq -c \
+                  --arg pv "$pg_version" --arg dv "$deb_version" \
+                  '. + [{"pg_version": $pv, "deb_version": $dv}]')
+              done <<< "$LATEST_TAGS"
+            done
           done
 
           echo "Matrix: $MATRIX_JSON"
