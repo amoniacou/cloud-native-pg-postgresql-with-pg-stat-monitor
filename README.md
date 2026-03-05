@@ -50,7 +50,6 @@ Build arguments:
 |---|---|---|
 | `PG_VERSION` | `17.6` | PostgreSQL version |
 | `DEB_VERSION` | `standard-trixie` | Debian variant |
-| `PGSM_VERSION` | `2.1.1` | pg_stat_monitor version |
 
 ## Auto-updates
 
